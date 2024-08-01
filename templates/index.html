@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>compareTo</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <form id="upload-form" enctype="multipart/form-data">
+            <!-- <label for="file1">Upload Graph 1:</label> -->
+            <div class="hero">
+                <label for="file1" id="drop-area">
+                    <input type="file" id="file1" name="file1" accept="image/*" required hidden>
+                    <div id="img-view">
+                        <img src="static/uploadicon.png">
+                        <p>Drag and drop or click here<br>to upload image</p>
+                        <span>Upload any images from desktop</span>
+                    </div>
+                </label>
+            </div>
+            <!-- <input type="file" id="file1" name="file1" accept="image/*" required>
+            -->
+            <!-- <label for="file2">Upload Graph 2:</label>
+            <input type="file" id="file2" name="file2" accept="image/*" required>
+            -->
+            <button type="submit">Compare</button>
+            <div id="loading-spinner" class="hidden">
+                <div class="spinner"></div>
+            </div>
+        </form>
+        <div id="results">
+            <!-- <h2>Comparison Result</h2> -->
+            <div id="comparison-text"></div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
