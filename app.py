@@ -5,8 +5,19 @@ import base64
 import requests
 import json
 import os
+import mysql.connector
+import pandas as pd
+from io import StringIO
 
 app = Flask(__name__)
+
+# MySQL Configuration
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': 'HappyHippo!',
+    'database': 'compareTo'
+}
 
 # External API URL
 url = "http://10.10.10.102:11434/api/generate"
@@ -15,6 +26,12 @@ url = "http://10.10.10.102:11434/api/generate"
 headers = {
     'Content-Type': 'application/json'
 }
+
+# Function to connect to the MySQL database
+def get_db_connection():
+    conn = mysql.connector.connect(**db_config)
+    print("Successfully connected to MySQL")
+    return conn
 
 # Function to read and encode image file to base64
 def encode_image_to_base64(image_file):
@@ -57,25 +74,8 @@ def process_incremental_response(response_chunks):
 def index():
     return render_template('index.html')
 
-"""
 @app.route('/upload', methods=['POST'])
-def upload_image():
-    try:
-        file = request.files['file']
-        if not file:
-            return jsonify({'error': 'No file provided'}), 400
-
-        encoded_image = encode_image_to_base64(file)
-        if encoded_image:
-            return jsonify({'encoded_image': encoded_image})
-        else:
-            return jsonify({'error': 'Failed to encode image'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-"""
-
-@app.route('/upload', methods=['POST'])
-def upload_image():
+def upload_file():
     try:
         file = request.files.get('file')
         if not file:
@@ -95,13 +95,66 @@ def upload_image():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/upload-csv', methods=['POST'])
+def upload_csv():
+    print("CSV upload")
+    try:
+        file = request.files.get('file')
+        if not file or not file.filename.endswith('.csv'):
+            return jsonify({'error': 'No CSV file provided or file is not a CSV'}), 400
+        
+        # Reads CSV file and decode it from binary
+        csv_data = file.read().decode('utf-8')
+
+        # Replaces b' with an empty string to clean up binary markers
+        csv_data = csv_data.replace("b'", "").replace("'", "")
+
+        # Converts CSV data to a dataframe
+        df = pd.read_csv(StringIO(csv_data))
+
+        # Verify the columns in the dataframe
+        expected_columns = ['Application', 'Bytes Received', 'Bytes Sent', 'Bytes']
+        if not all(col in df.columns for col in expected_columns):
+            return jsonify({'error': 'CSV file is missing required columns'}), 400
+
+        # Connect to MySQL and insert data
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Create a table if not exists
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS flight_data (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                application VARCHAR(255),
+                bytes_received VARCHAR(255),
+                bytes_sent VARCHAR(255),
+                total_bytes VARCHAR(255)
+            )
+        """)
+
+        # Insert data into table
+        for _, row in df.iterrows():
+            cursor.execute("""
+                INSERT INTO flight_data (application, bytes_received, bytes_sent, total_bytes)
+                VALUES (%s, %s, %s, %s)
+            """, (row['Application'], row['Bytes Received'], row['Bytes Sent'], row['Bytes']))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        print('success')
+        return jsonify({'success': True, 'message': 'CSV data uploaded and stored successfully.'})
+    except Exception as e:
+        print('fail')
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/compare', methods=['POST'])
 def compare_images():
+    print("Analyzing...")
     try:
-        file1 = request.files.get('file1')
-        # file2 = request.files.get('file2')
-
+        file1 = request.files.get('file')
         if not file1:
             return jsonify({'success': False, 'error': 'Image must be provided'}), 400
         
@@ -112,10 +165,9 @@ def compare_images():
         if encoded_uploaded_image and encoded_static_image:
             data = {
                 "model": "llava-llama3",
-                "prompt": "Please analyze the two images provided. The first image is a graph of network data. If the first image is not a graph, respond with {'error': 'Please upload a graph'}. If the first image is a graph, compare it to the second image, which is a reference graph. Provide the analysis in the following JSON format:\n\n{\n  'peak_usage_time': '[Provide the peak usage time]',\n  'low_usage_time': '[Provide the low usage time]',\n  'differences': '[Describe the differences between the first and second graph]'\n}",
+                "prompt": "You are an AI chatbot designed to provide a post-flight connectivity summary to business aviation customers. Analyze this graph of incoming and outgoing traffic in mbps on a client's aircraft throughout their flight. Provide a post-flight connectivity summary as if you are talking to a client who's jet just landed. Keep the summary brief and get straight to the point. Include the peak usage time, low usage time, and differences compared to past flights. Start with 'During your flight...'",
                 "images": [encoded_uploaded_image, encoded_static_image]
             }
-
 
             response = requests.post(url, headers=headers, json=data)
 
@@ -134,46 +186,6 @@ def compare_images():
             return jsonify({'success': False, 'error': 'Failed to encode one or both images'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
-
-"""
-@app.route('/test-connection', methods=['GET'])
-def test_connection():
-    try:
-        image_path1 = os.path.join(app.static_folder, 'graph1.jpg')
-        image_path2 = os.path.join(app.static_folder, 'graph2.png')
-
-        print(f"Checking image paths: {image_path1} and {image_path2}")
-
-        if not os.path.exists(image_path1) or not os.path.exists(image_path2):
-            return jsonify({'error': 'One or both test images not found'}), 500
-        
-        with open(image_path1, 'rb') as img_file1, open(image_path2, 'rb') as img_file2:
-            encoded_image1 = encode_image_to_base64(img_file1)
-            encoded_image2 = encode_image_to_base64(img_file2)
-
-        if encoded_image1 and encoded_image2:
-            data = {
-                "model": "llava-llama3",
-                "prompt": "Compare these two images",
-                "images": [encoded_image1, encoded_image2]
-            }
-
-            response = requests.post(url, headers=headers, json=data)
-
-            if response.status_code == 200:
-                try:
-                    response_chunks = response.text.splitlines()
-                    combined_response = process_incremental_response(response_chunks)
-                    return jsonify({'success': True, 'comparison_result': combined_response})
-                except json.JSONDecodeError:
-                    return jsonify({'success': False, 'error': 'Failed to decode JSON response', 'response': response.text}), 500
-            else:
-                return jsonify({'success': False, 'error': f'Request failed with status code {response.status_code}', 'response': response.text}), 500
-        else:
-            return jsonify({'success': False, 'error': 'Failed to encode one or both images'}), 500
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-"""
 
 if __name__ == '__main__':
     app.run(debug=True)
